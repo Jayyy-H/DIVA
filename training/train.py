@@ -47,7 +47,7 @@ from training.prompting_utils import UniversalPrompting, create_attention_mask_p
 from models.lr_schedulers import get_scheduler
 
 # =========================================================================
-# [DIVA] Import Custom Modules
+# Import Modules
 # =========================================================================
 from training.diva_utils import DIVAConfig, GatedMLP, CLUB, info_nce_loss
 
@@ -82,12 +82,12 @@ def info_nce(z1, z2, T=0.1):
 
 def main():
     # -------------------------------------------------------------------------
-    # 1. Setup Accelerator & Config (Original Logic)
+    # Setup Accelerator & Config (Original Logic)
     # -------------------------------------------------------------------------
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("config", type=str, help="Path to config file")
-    # [DIVA] Add Stage Argument
+    # Add Stage Argument
     parser.add_argument("--diva_stage", type=int, default=2, help="1 for Decomposition, 2 for Mutual Reinforcement")
     args = parser.parse_args()
     config = OmegaConf.load(args.config)
@@ -113,7 +113,7 @@ def main():
     set_seed(42)
 
     # -------------------------------------------------------------------------
-    # 2. Load Models (Original Logic + DIVA Init)
+    # Load Models (Original Logic + DIVA Init)
     # -------------------------------------------------------------------------
     # VQ Model
     vq_model = MAGVITv2.from_pretrained(config.model.vq_model.vq_model_name).to(accelerator.device)
@@ -134,7 +134,7 @@ def main():
     )
     tokenizer.pad_token_id = tokenizer.eos_token_id
 
-    # [DIVA] Initialize DIVA Modules
+    # Initialize DIVA Modules
     diva_cfg = DIVAConfig()
     diva_cfg.stage = args.diva_stage # Override config with CLI arg
     
@@ -196,7 +196,7 @@ def main():
         
         
         # =====================================================
-        # (1) Logit injection (still main supervision!)
+        # (1) Logit injection 
         # =====================================================
         
         logits_gen = ret_gen.logits
@@ -224,7 +224,7 @@ def main():
         
         # =====================================================
         # (2) Shared alignment (InfoNCE)
-        # asym stop-grad !!!
+        # asym stop-grad
         # =====================================================
         
         loss_align = (
@@ -275,11 +275,11 @@ def main():
         for param in model.parameters():
             param.requires_grad = True # Or use LoRA config here if needed
             
-        # 1. Backbone Params (with careful decay grouping)
+        # Backbone Params
         backbone_groups = get_grouped_params(model, weight_decay)
         optimizer_grouped_parameters.extend(backbone_groups)
         
-        # 2. DIVA Encoder Params
+        # DIVA Encoder Params
         diva_params = list(shared_enc_und.parameters()) + list(shared_enc_gen.parameters()) + \
                       list(unique_enc_und.parameters()) + list(unique_enc_gen.parameters())
         optimizer_grouped_parameters.append({"params": diva_params, "weight_decay": weight_decay})
@@ -293,9 +293,9 @@ def main():
     )
     
     # -------------------------------------------------------------------------
-    # Dataset (Focusing on T2I for Pairs)
+    # Dataset 
     # -------------------------------------------------------------------------
-    # Using original Text2ImageDataset logic
+    
     dataset = Text2ImageDataset(
         config.data.dataset.train_data_path,
         tokenizer=tokenizer,
@@ -323,7 +323,7 @@ def main():
         num_training_steps=max_train_steps * accelerator.num_processes,
     )
 
-    # Prepare with Accelerator (Crucial for Distributed Training)
+    # Prepare with Accelerator 
     (
         model, 
         shared_enc_und, shared_enc_gen, unique_enc_und, unique_enc_gen, club_disc,
@@ -337,10 +337,9 @@ def main():
     # Helper Utils
     mask_scheduler = get_mask_chedule(config.training.noise_type)
 
-    # 4. Dataset & Dataloader (Original Logic Preserved)
+    # Dataset & Dataloader (Original Logic Preserved)
     # -------------------------------------------------------------------------
-    # [DIVA Note]: We focus on Text2ImageDataset because it provides paired (Image, Text).
-    # This acts as our "Semantic Anchor" source.
+    
     dataset = Text2ImageDataset(
         config.data.dataset.train_data_path,
         tokenizer=tokenizer,
@@ -349,7 +348,7 @@ def main():
     )
     
     # Original logic uses CombinedLoader if multiple datasets exist.
-    # For DIVA Post-training, we simplify to single loader to ensure strict pairing.
+    
     train_dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_size=config.training.batch_size_t2i,
@@ -361,7 +360,7 @@ def main():
     )
 
     # -------------------------------------------------------------------------
-    # 5. Scheduler & Math (Original Logic Preserved)
+    # Scheduler & Math (Original Logic Preserved)
     # -------------------------------------------------------------------------
     # Calculate total training steps
     overrode_max_train_steps = False
@@ -383,8 +382,7 @@ def main():
     )
 
     # -------------------------------------------------------------------------
-    # 6. Accelerator Prepare (Critical for Distributed Training)
-   
+    # Accelerator Prepare 
     (
         model, 
         shared_enc_und, shared_enc_gen, unique_enc_und, unique_enc_gen, club_disc,
@@ -400,13 +398,13 @@ def main():
     if not overrode_max_train_steps:
         max_train_steps = config.experiment.max_train_examples_t2i // config.training.batch_size_t2i
     
-    # We need to calculate the number of epochs
+    
     num_train_epochs = math.ceil(max_train_steps / num_update_steps_per_epoch)
 
     # -------------------------------------------------------------------------
-    # 7. Utils for Prompting & Masking (Original Logic Preserved)
+    # Utils for Prompting & Masking (Original Logic Preserved)
     # -------------------------------------------------------------------------
-    # Universal Prompting is needed to construct input_ids for both T2I and MMU tasks
+    
     uni_prompting = UniversalPrompting(
         tokenizer, 
         max_text_len=config.data.preprocessing.max_seq_length, 
@@ -418,13 +416,12 @@ def main():
     mask_scheduler = get_mask_chedule(config.training.noise_type)
 
     # -------------------------------------------------------------------------
-    # 8. Resume from Checkpoint (Original Logic Preserved)
+    # Resume from Checkpoint (Original Logic Preserved)
     # -------------------------------------------------------------------------
     if config.experiment.resume_from_checkpoint:
         if config.experiment.resume_from_checkpoint != "latest":
             path = os.path.basename(config.experiment.resume_from_checkpoint)
         else:
-            # Get the most recent checkpoint
             dirs = [f.name for f in os.scandir(config.experiment.output_dir) if f.is_dir()]
             dirs.sort(key=os.path.getctime)
             path = dirs[-1] if len(dirs) > 0 else None
@@ -447,8 +444,8 @@ def main():
         first_epoch = 0
 
     # -------------------------------------------------------------------------
-    # 9. Training Loop Start
-    # -------------------------------------------------------------------------
+    # Training Loop Start
+    
     total_batch_size = config.training.batch_size_t2i * accelerator.num_processes * config.training.gradient_accumulation_steps
 
     logger.info("***** Running DIVA Post-Training *****")
@@ -470,8 +467,6 @@ def main():
     # Set model to train
     model.train()
     
-    # [DIVA Stage 1 Check]: Ensure backbone is strictly eval mode if needed, though optimizer handles grads.
-    # But setting eval() might disable dropout which is desired for freezing.
     if diva_cfg.stage == 1:
         model.eval() 
     
@@ -489,20 +484,13 @@ def main():
                 # We do this once, shared for both streams.
                 with torch.no_grad():
                     image_tokens = vq_model.get_codebook_indices(pixel_values) # [B, 1024] or similar
-
-                # ==========================================
-                # B. Stream 1: Generation (Text-to-Image)
-                # ==========================================
-                # Show-o Input: <t2i> text <soi> [MASK] <eoi>
-                # We pass input_ids (text) and image_tokens (target). 
-                # Model handles masking internally via mask_scheduler.
                 
                 ret_gen = model(
                     input_ids=input_ids,
                     image_tokens=image_tokens,
                     input_type="t2i",
                     mask_scheduler=mask_scheduler,
-                    output_hidden_states=True, # [DIVA Required]
+                    output_hidden_states=True, 
                     return_dict=True
                 )
                 loss_gen = ret_gen.loss
@@ -514,17 +502,15 @@ def main():
                 feat_gen_raw = ret_gen.hidden_states[diva_cfg.middle_layer_idx].mean(dim=1)
 
                 # ==========================================
-                # C. Stream 2: Understanding (MMU / Captioning)
+                # Stream 2: Understanding 
                 # ==========================================
-                # Show-o Input: <mmu> <soi> image <eoi> <sov> text <eov>
-                # We use the SAME image and text. Task: Predict text given image.
                 
                 ret_und = model(
                     input_ids=input_ids,
                     image_tokens=image_tokens,
                     input_type="mmu",
-                    labels=input_ids, # Standard Causal LM training (Text is target)
-                    output_hidden_states=True, # [DIVA Required]
+                    labels=input_ids, 
+                    output_hidden_states=True, 
                     return_dict=True
                 )
                 loss_und = ret_und.loss
@@ -609,7 +595,7 @@ def main():
                 optimizer.zero_grad()
 
             # -------------------------------------------------------------------------
-            # 11. Logging (Original Logic + DIVA Metrics)
+            # Logging (Original Logic + DIVA Metrics)
             # -------------------------------------------------------------------------
             if accelerator.sync_gradients:
                 if global_step % config.experiment.log_every == 0:
@@ -635,7 +621,7 @@ def main():
                         })
 
             # -------------------------------------------------------------------------
-            # 12. Checkpointing (Original Logic Preserved)
+            # Checkpointing (Original Logic Preserved)
             # -------------------------------------------------------------------------
             if global_step % config.experiment.save_every == 0 and global_step > 0:
                 save_path = Path(config.experiment.output_dir) / f"checkpoint-{global_step}"
