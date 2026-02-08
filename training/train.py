@@ -71,6 +71,15 @@ def get_grouped_params(model, weight_decay, no_decay_name_list=["bias", "LayerNo
         {"params": params_without_decay, "weight_decay": 0.0},
     ]
 
+def info_nce(z1, z2, T=0.1):
+    z1 = F.normalize(z1, dim=-1)
+    z2 = F.normalize(z2, dim=-1)
+
+    logits = z1 @ z2.T / T
+    labels = torch.arange(z1.size(0), device=z1.device)
+
+    return F.cross_entropy(logits, labels)
+
 def main():
     # -------------------------------------------------------------------------
     # 1. Setup Accelerator & Config (Original Logic)
@@ -131,11 +140,35 @@ def main():
     
     logger.info(f"*** DIVA Initialization: Running Stage {diva_cfg.stage} ***")
 
-    # Encoders (Shared & Unique)
-    shared_enc_und = GatedMLP(diva_cfg.hidden_dim, diva_cfg.hidden_dim).to(accelerator.device)
-    shared_enc_gen = GatedMLP(diva_cfg.hidden_dim, diva_cfg.hidden_dim).to(accelerator.device)
-    unique_enc_und = GatedMLP(diva_cfg.hidden_dim, diva_cfg.hidden_dim).to(accelerator.device)
-    unique_enc_gen = GatedMLP(diva_cfg.hidden_dim, diva_cfg.hidden_dim).to(accelerator.device)
+    # =========================================================
+    # Encoders
+    # =========================================================
+    shared_enc_und = GatedMLP(diva_cfg.hidden_dim, diva_cfg.proj_dim).to(accelerator.device)
+    shared_enc_gen = GatedMLP(diva_cfg.hidden_dim, diva_cfg.proj_dim).to(accelerator.device)
+    
+    unique_enc_und = GatedMLP(diva_cfg.hidden_dim, diva_cfg.proj_dim).to(accelerator.device)
+    unique_enc_gen = GatedMLP(diva_cfg.hidden_dim, diva_cfg.proj_dim).to(accelerator.device)
+    
+    
+    # =========================================================
+    # Low-rank readouts  (CRITICAL — missing in your code)
+    # =========================================================
+    rank = diva_cfg.readout_rank
+    
+    class LowRankReadout(torch.nn.Module):
+        def __init__(self, in_dim, out_dim, r):
+            super().__init__()
+            self.P = torch.nn.Linear(in_dim, r, bias=False)
+            self.Q = torch.nn.Linear(r, out_dim, bias=False)
+    
+        def forward(self, x):
+            return self.Q(self.P(x))
+    
+    
+    # map → vocab logits bias
+    A_U = LowRankReadout(diva_cfg.proj_dim, model.config.vocab_size, rank).to(accelerator.device)
+    A_G = LowRankReadout(diva_cfg.proj_dim, model.config.vocab_size, rank).to(accelerator.device)
+
     
     # CLUB Discriminator
     club_disc = CLUB(diva_cfg.hidden_dim, diva_cfg.hidden_dim).to(accelerator.device)
@@ -149,22 +182,94 @@ def main():
     
     # Parameter Grouping Logic
     optimizer_grouped_parameters = []
-
-    # [DIVA Stage 1]: Decomposition
-    # FREEZE Backbone, Train ONLY Encoders.
     if diva_cfg.stage == 1:
-        logger.info("[DIVA Stage 1] Freezing Show-o Backbone. Training only DIVA Encoders.")
-        for param in model.parameters():
-            param.requires_grad = False
-            
-        # Only add DIVA params to optimizer
-        diva_params = list(shared_enc_und.parameters()) + list(shared_enc_gen.parameters()) + \
-                      list(unique_enc_und.parameters()) + list(unique_enc_gen.parameters())
+    # DIVA Stage 1: Decomposition
+    # =====================================================
+        # Factorization
+        # =====================================================
+        
+        z_sh_und = shared_enc_und(feat_und_raw)
+        z_sh_gen = shared_enc_gen(feat_gen_raw)
+        
+        z_un_und = unique_enc_und(feat_und_raw)
+        z_un_gen = unique_enc_gen(feat_gen_raw)
+        
+        
+        # =====================================================
+        # (1) Logit injection (still main supervision!)
+        # =====================================================
+        
+        logits_gen = ret_gen.logits
+        logits_und = ret_und.logits
+        
+        bias_U = A_U(z_sh_gen) + A_U(z_un_und)
+        bias_G = A_G(z_sh_und) + A_G(z_un_gen)
+        
+        logits_und = logits_und + bias_U.unsqueeze(1)
+        logits_gen = logits_gen + bias_G.unsqueeze(1)
+        
+        
+        loss_gen = F.cross_entropy(
+            logits_gen.view(-1, logits_gen.size(-1)),
+            ret_gen.labels.view(-1),
+            ignore_index=-100
+        )
+        
+        loss_und = F.cross_entropy(
+            logits_und.view(-1, logits_und.size(-1)),
+            ret_und.labels.view(-1),
+            ignore_index=-100
+        )
+        
+        
+        # =====================================================
+        # (2) Shared alignment (InfoNCE)
+        # asym stop-grad !!!
+        # =====================================================
+        
+        loss_align = (
+            info_nce(z_sh_und, z_sh_gen.detach()) +
+            info_nce(z_sh_gen, z_sh_und.detach())
+        ) * 0.5
+        
+        
+        # =====================================================
+        # (3) Unique independence (CLUB MI upper bound)
+        # =====================================================
+        
+        mi_und = club_disc_und(z_un_und, z_un_gen.detach())
+        mi_gen = club_disc_gen(z_un_gen, z_un_und.detach())
+        
+        loss_uni = mi_und + mi_gen
+        
+        
+        # =====================================================
+        # (4) Orthogonality
+        # =====================================================
+        
+        loss_orth = (
+            (z_sh_und.T @ z_un_und).pow(2).mean() +
+            (z_sh_gen.T @ z_un_gen).pow(2).mean()
+        )
+        
+        
+        # =====================================================
+        # Total loss 
+        # =====================================================
+        
+        loss_total = (
+            loss_gen
+            + loss_und
+            + diva_cfg.lambda_sha * loss_align
+            + diva_cfg.lambda_uni * loss_uni
+            + diva_cfg.lambda_orth * loss_orth
+        )
+
         
         optimizer_grouped_parameters = [{"params": diva_params, "weight_decay": weight_decay}]
 
-    # [DIVA Stage 2]: Mutual Reinforcement
-    # UNFREEZE Backbone (or LoRA), Train Everything.
+    # Stage 2: Mutual Reinforcement
+     
     elif diva_cfg.stage == 2:
         logger.info("[DIVA Stage 2] Unfreezing Show-o Backbone. Joint Training enabled.")
         for param in model.parameters():
@@ -187,11 +292,8 @@ def main():
         eps=config.optimizer.params.epsilon,
     )
     
-    # CLUB Optimizer (Always separate, used for maximization step)
-    optimizer_club = AdamW(club_disc.parameters(), lr=diva_cfg.lr_club)
-
     # -------------------------------------------------------------------------
-    # 4. Dataset (Focusing on T2I for Pairs)
+    # Dataset (Focusing on T2I for Pairs)
     # -------------------------------------------------------------------------
     # Using original Text2ImageDataset logic
     dataset = Text2ImageDataset(
@@ -429,52 +531,68 @@ def main():
                 
                 # Extract Middle Layer Features for Understanding
                 feat_und_raw = ret_und.hidden_states[diva_cfg.middle_layer_idx].mean(dim=1)
-
-                # ==========================================
-                # D. DIVA Logic: Decomposition & Loss
-                # ==========================================
                 
-                # 1. Project to Shared/Unique Spaces (Decomposition)
                 z_sh_und = shared_enc_und(feat_und_raw)
                 z_sh_gen = shared_enc_gen(feat_gen_raw)
                 
                 z_un_und = unique_enc_und(feat_und_raw)
                 z_un_gen = unique_enc_gen(feat_gen_raw)
                 
-                # 2. CLUB Optimization (Maximization Step)
-                # We must train the discriminator to estimate p(y|x) well.
-                # Crucial: Detach input features so we don't backprop to encoders yet.
-                loss_club_update = club_disc.loglikeli(z_sh_und.detach(), z_un_und.detach()) + \
-                                   club_disc.loglikeli(z_sh_gen.detach(), z_un_gen.detach())
                 
-                # Backward for CLUB Discriminator
-                # Note: We want to Maximize LogLikelihood, so Minimize -LogLikelihood
-                optimizer_club.zero_grad()
-                accelerator.backward(-loss_club_update) 
-                optimizer_club.step()
+                # =====================================================
+                # Logit Injection 
+                # =====================================================
                 
-                # 3. DIVA Regularization Losses (Minimization Step)
+                # backbone logits
+                logits_gen = ret_gen.logits
+                logits_und = ret_und.logits
                 
-                # (a) Alignment (InfoNCE): Pull shared features together
-                loss_align = info_nce_loss(z_sh_und, z_sh_gen, temperature=diva_cfg.temp)
                 
-                # (b) Disentanglement (CLUB MI Upper Bound): Minimize MI between Shared and Unique
-                # This pushes Shared and Unique to be independent.
-                mi_und = club_disc.mi_est(z_sh_und, z_un_und)
-                mi_gen = club_disc.mi_est(z_sh_gen, z_un_gen)
-                loss_dis = (mi_und + mi_gen) / 2
+                # low-rank readout → bias
+                bias_U = A_U(z_sh_gen) + A_U(z_un_und)
+                bias_G = A_G(z_sh_und) + A_G(z_un_gen)
                 
-                # ==========================================
-                # E. Total Loss Calculation & Backward
-                # ==========================================
-                # Weighted Sum
-                # If Stage 1: Backbone is frozen, loss_gen/loss_und gradients won't update backbone.
-                #             But DIVA gradients will update Encoders.
-                # If Stage 2: All updates.
+                # broadcast to token dimension
+                bias_U = bias_U.unsqueeze(1)
+                bias_G = bias_G.unsqueeze(1)
                 
-                loss_total = loss_gen + loss_und + \
-                             diva_cfg.lambda_align * loss_align + \
-                             diva_cfg.lambda_dis * loss_dis
+                logits_und = logits_und + bias_U
+                logits_gen = logits_gen + bias_G
+                
+                
+                # =====================================================
+                # recompute CE loss with injected logits
+                # =====================================================
+                
+                loss_gen = F.cross_entropy(
+                    logits_gen.view(-1, logits_gen.size(-1)),
+                    ret_gen.labels.view(-1),
+                    ignore_index=-100
+                )
+                
+                loss_und = F.cross_entropy(
+                    logits_und.view(-1, logits_und.size(-1)),
+                    ret_und.labels.view(-1),
+                    ignore_index=-100
+                )
+                
+                
+                # =====================================================
+                # Orthogonality guardrail
+                # =====================================================
+                
+                loss_orth = (
+                    (z_sh_und.T @ z_un_und).pow(2).mean() +
+                    (z_sh_gen.T @ z_un_gen).pow(2).mean()
+                )
+                
+                
+                # =====================================================
+                # Stage 1 total loss
+                # =====================================================
+                
+                loss_total = loss_gen + loss_und + diva_cfg.lambda_orth * loss_orth
+
 
                 accelerator.backward(loss_total)
                 
