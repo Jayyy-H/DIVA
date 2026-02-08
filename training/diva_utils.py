@@ -110,7 +110,79 @@ def info_nce_loss(features_a, features_b, temperature=0.07):
     
     return (loss_a + loss_b) / 2
 
-def orthogonality_loss(shared_feat, unique_feat):
-    # orthogonality
-    cosine_sim = F.cosine_similarity(shared_feat, unique_feat, dim=-1)
-    return torch.mean(cosine_sim ** 2)
+class LowRankReadout(nn.Module):
+    """
+    Low-rank projection used for logit bias injection.
+
+    Implements A = P Q^T with rank r.
+
+    Args:
+        in_dim  : encoder dim (d)
+        out_dim : vocab size (V_t or V_v)
+        rank    : low rank (e.g. 32/64)
+    """
+    def __init__(self, in_dim, out_dim, rank=64):
+        super().__init__()
+
+        self.P = nn.Parameter(torch.randn(out_dim, rank) * 0.02)
+        self.Q = nn.Parameter(torch.randn(in_dim, rank) * 0.02)
+
+    def forward(self, z):
+        # z: [B, d]
+        # -> [B, r]
+        h = z @ self.Q
+        # -> [B, V]
+        return h @ self.P.T
+
+
+# ------------------------------------------------------------
+# Broadcast helper
+# ------------------------------------------------------------
+def add_bias_to_logits(logits, bias):
+    """
+    logits : [B, V, L]
+    bias   : [B, V]
+
+    return logits + bias broadcast on sequence dim
+    """
+    return logits + bias.unsqueeze(-1)
+
+
+# ------------------------------------------------------------
+# Orthogonality Guardrail Loss 
+# ------------------------------------------------------------
+def orthogonal_loss(z_sh, z_uni):
+    """
+    Implements:
+        || z_sh^T z_uni ||_F^2
+
+    Inputs:
+        z_sh  : [B, d]
+        z_uni : [B, d]
+    """
+    # [d, d]
+    corr = z_sh.T @ z_uni / z_sh.size(0)
+    return (corr ** 2).sum()
+
+
+# ------------------------------------------------------------
+# Linear schedule helper 
+# ------------------------------------------------------------
+class LinearWarmupWeight:
+    """
+    Linearly increases weight from 0 to target.
+
+    Used for:
+        lambda_uni
+        lambda_sha
+        or enabling unique injection gradually
+    """
+    def __init__(self, target, warmup_steps):
+        self.target = target
+        self.warmup = warmup_steps
+
+    def __call__(self, step):
+        if self.warmup <= 0:
+            return self.target
+        scale = min(1.0, step / self.warmup)
+        return self.target * scale
