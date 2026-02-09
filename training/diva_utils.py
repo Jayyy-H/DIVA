@@ -15,8 +15,9 @@ class DIVAConfig:
         
         # loss weight
         self.temp = 0.07            
-        self.lambda_align = 0.1      
-        self.lambda_dis = 0.01      
+        self.lambda_sha = 0.6
+        self.lambda_uni = 0.6
+        self.lambda_orth = 0.1
         self.lr_club = 1e-4         
 
 class GatedMLP(nn.Module):
@@ -76,7 +77,8 @@ class CLUB(nn.Module):
         mu, logvar = self.get_mu_logvar(x_samples)
         
         sample_size = x_samples.shape[0]
-        random_index = torch.randperm(sample_size).long()
+        random_index = torch.randperm(sample_size, device=x_samples.device)
+
         
         # Positive pairs: (x_i, y_i) -> p(x,y)
         positive = - (mu - y_samples)**2 / logvar.exp()
