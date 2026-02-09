@@ -168,92 +168,8 @@ def main():
     # Parameter Grouping Logic
     optimizer_grouped_parameters = []
     if diva_cfg.stage == 1:
-    # DIVA Stage 1: Decomposition
-    # =====================================================
-        # Factorization
-        # =====================================================
-        
-        z_sh_und = shared_enc_und(feat_und_raw)
-        z_sh_gen = shared_enc_gen(feat_gen_raw)
-        
-        z_un_und = unique_enc_und(feat_und_raw)
-        z_un_gen = unique_enc_gen(feat_gen_raw)
-        
-        
-        # =====================================================
-        # (1) Logit injection 
-        # =====================================================
-        
-        logits_gen = ret_gen.logits
-        logits_und = ret_und.logits
-        
-        bias_U = A_U(z_sh_gen) + A_U(z_un_und)
-        bias_G = A_G(z_sh_und) + A_G(z_un_gen)
-        
-        logits_und = logits_und + bias_U.unsqueeze(1)
-        logits_gen = logits_gen + bias_G.unsqueeze(1)
-        
-        
-        loss_gen = F.cross_entropy(
-            logits_gen.view(-1, logits_gen.size(-1)),
-            ret_gen.labels.view(-1),
-            ignore_index=-100
-        )
-        
-        loss_und = F.cross_entropy(
-            logits_und.view(-1, logits_und.size(-1)),
-            ret_und.labels.view(-1),
-            ignore_index=-100
-        )
-        
-        
-        # =====================================================
-        # (2) Shared alignment (InfoNCE)
-        # asym stop-grad
-        # =====================================================
-        
-        loss_align = (
-            info_nce(z_sh_und, z_sh_gen.detach()) +
-            info_nce(z_sh_gen, z_sh_und.detach())
-        ) * 0.5
-        
-        
-        # =====================================================
-        # (3) Unique independence (CLUB MI upper bound)
-        # =====================================================
-        
-        mi_und = club_disc_und(z_un_und, z_un_gen.detach())
-        mi_gen = club_disc_gen(z_un_gen, z_un_und.detach())
-        
-        loss_uni = mi_und + mi_gen
-        
-        
-        # =====================================================
-        # (4) Orthogonality
-        # =====================================================
-        
-        loss_orth = (
-            (z_sh_und.T @ z_un_und).pow(2).mean() +
-            (z_sh_gen.T @ z_un_gen).pow(2).mean()
-        )
-        
-        
-        # =====================================================
-        # Total loss 
-        # =====================================================
-        
-        loss_total = (
-            loss_gen
-            + loss_und
-            + diva_cfg.lambda_sha * loss_align
-            + diva_cfg.lambda_uni * loss_uni
-            + diva_cfg.lambda_orth * loss_orth
-        )
-
-        
-        optimizer_grouped_parameters = [{"params": diva_params, "weight_decay": weight_decay}]
-
-    # Stage 2: Mutual Reinforcement
+        for p in model.parameters():
+            p.requires_grad = False
      
     elif diva_cfg.stage == 2:
         logger.info("[DIVA Stage 2] Unfreezing Show-o Backbone. Joint Training enabled.")
@@ -520,8 +436,13 @@ def main():
                 
                 
                 # low-rank readout → bias
-                bias_U = A_U(z_sh_gen) + A_U(z_un_und)
-                bias_G = A_G(z_sh_und) + A_G(z_un_gen)
+                if stage==1:
+                    bias_U = A_U(z_sh_gen)
+                    bias_G = A_G(z_sh_UND)
+                else:
+                    bias_U = A_U(z_sh_gen) + A_U(z_un_und)
+                    bias_G = A_G(z_sh_und) + A_G(z_un_gen)
+               
                 
                 # broadcast to token dimension
                 bias_U = bias_U.unsqueeze(1)
@@ -534,6 +455,20 @@ def main():
                 # =====================================================
                 # recompute CE loss with injected logits
                 # =====================================================
+
+                optimizer_club.zero_grad()
+
+                loss_club = club_disc.loglikeli(z_sh_und.detach(), z_un_und.detach()) + \
+                            club_disc.loglikeli(z_sh_gen.detach(), z_un_gen.detach())
+                
+                accelerator.backward(-loss_club)
+                optimizer_club.step()
+
+                loss_mi = club_disc.mi_est(z_sh_und, z_un_und) + \
+                          club_disc.mi_est(z_sh_gen, z_un_gen)
+
+                loss_align = info_nce_loss(z_sh_und, z_sh_gen, diva_cfg.temp)
+
                 
                 loss_gen = F.cross_entropy(
                     logits_gen.view(-1, logits_gen.size(-1)),
@@ -562,7 +497,16 @@ def main():
                 # Stage 1 total loss
                 # =====================================================
                 
-                loss_total = loss_gen + loss_und + diva_cfg.lambda_orth * loss_orth
+                
+                loss_total = (
+                    loss_gen
+                    + loss_und
+                    + diva_cfg.lambda_sha * loss_align
+                    + diva_cfg.lambda_uni * loss_mi
+                    + diva_cfg.lambda_orth * loss_orth
+                )
+
+
 
 
                 accelerator.backward(loss_total)
@@ -587,11 +531,8 @@ def main():
                     # Calculate avg loss across processes for logging
                     avg_loss = accelerator.gather(loss_total.repeat(config.training.batch_size_t2i)).mean()
                     
-                    logger.info(
-                        f"Step {global_step}: Total={avg_loss.item():.4f} | "
-                        f"Gen={loss_gen.item():.4f} | Und={loss_und.item():.4f} | "
-                        f"Align={loss_align.item():.4f} | MI={loss_dis.item():.4f}"
-                    )
+                    wandb.log({k: v for k,v in locals().items() if k.startswith("loss_")})
+
                     
                     if accelerator.is_main_process:
                         wandb.log({
