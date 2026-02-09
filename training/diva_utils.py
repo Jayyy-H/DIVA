@@ -136,7 +136,7 @@ class LowRankReadout(nn.Module):
 
 
 # ------------------------------------------------------------
-# Broadcast helper
+# Broadcast
 # ------------------------------------------------------------
 def add_bias_to_logits(logits, bias):
     """
@@ -166,7 +166,7 @@ def orthogonal_loss(z_sh, z_uni):
 
 
 # ------------------------------------------------------------
-# Linear schedule helper 
+# Linear schedule 
 # ------------------------------------------------------------
 class LinearWarmupWeight:
     """
