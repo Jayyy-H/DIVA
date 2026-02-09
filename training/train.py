@@ -497,7 +497,7 @@ def main():
                 
                 # Extract Middle Layer Features for Generation
                 # Shape: [Batch, Seq, Dim]. We pool to get [Batch, Dim]
-                # Note: We assume Layer 16 (or configured layer). 
+ 
                
                 feat_gen_raw = ret_gen.hidden_states[diva_cfg.middle_layer_idx].mean(dim=1)
 
