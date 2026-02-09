@@ -53,7 +53,7 @@ from training.diva_utils import DIVAConfig, GatedMLP, CLUB, info_nce_loss
 
 logger = get_logger(__name__)
 
-# [Original Helper Function Preserved]
+# Original Function Preserved
 def get_grouped_params(model, weight_decay, no_decay_name_list=["bias", "LayerNorm.weight", "layernorm.weight", "norm.weight", "ln_k.weight", "ln_q.weight", "ln_v.weight", "ln_1.weight", "ln_2.weight"]):
     params_with_decay = []
     params_with_decay_names = []
@@ -151,7 +151,7 @@ def main():
     
     
     # =========================================================
-    # Low-rank readouts  (CRITICAL — missing in your code)
+    # Low-rank readouts  
     # =========================================================
     rank = diva_cfg.readout_rank
     
@@ -174,7 +174,7 @@ def main():
     club_disc = CLUB(diva_cfg.hidden_dim, diva_cfg.hidden_dim).to(accelerator.device)
 
     # -------------------------------------------------------------------------
-    # 3. Two-Stage Optimizer Configuration (Crucial Logic)
+    # Two-Stage Optimizer Configuration 
     # -------------------------------------------------------------------------
     
     # Default weight decay logic from original code
@@ -273,7 +273,7 @@ def main():
     elif diva_cfg.stage == 2:
         logger.info("[DIVA Stage 2] Unfreezing Show-o Backbone. Joint Training enabled.")
         for param in model.parameters():
-            param.requires_grad = True # Or use LoRA config here if needed
+            param.requires_grad = True 
             
         # Backbone Params
         backbone_groups = get_grouped_params(model, weight_decay)
@@ -334,10 +334,11 @@ def main():
         optimizer, optimizer_club, dataloader, lr_scheduler
     )
 
-    # Helper Utils
+    
     mask_scheduler = get_mask_chedule(config.training.noise_type)
 
-    # Dataset & Dataloader (Original Logic Preserved)
+    # -------------------------------------------------------------------------
+    # Dataset & Dataloader 
     # -------------------------------------------------------------------------
     
     dataset = Text2ImageDataset(
@@ -347,7 +348,6 @@ def main():
         max_seq_length=config.data.preprocessing.max_seq_length,
     )
     
-    # Original logic uses CombinedLoader if multiple datasets exist.
     
     train_dataloader = torch.utils.data.DataLoader(
         dataset,
@@ -360,13 +360,13 @@ def main():
     )
 
     # -------------------------------------------------------------------------
-    # Scheduler & Math (Original Logic Preserved)
+    # Scheduler 
     # -------------------------------------------------------------------------
     # Calculate total training steps
     overrode_max_train_steps = False
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / config.training.gradient_accumulation_steps)
     
-    # Using T2I examples count as the main counter
+   
     if config.experiment.max_train_examples_t2i is None:
         max_train_steps = config.experiment.max_train_steps
         overrode_max_train_steps = True
@@ -393,7 +393,7 @@ def main():
         optimizer, optimizer_club, train_dataloader, lr_scheduler
     )
 
-    # Recalculate steps after prepare (for distributed adjustments)
+    # Recalculate steps after prepare 
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / config.training.gradient_accumulation_steps)
     if not overrode_max_train_steps:
         max_train_steps = config.experiment.max_train_examples_t2i // config.training.batch_size_t2i
@@ -402,7 +402,7 @@ def main():
     num_train_epochs = math.ceil(max_train_steps / num_update_steps_per_epoch)
 
     # -------------------------------------------------------------------------
-    # Utils for Prompting & Masking (Original Logic Preserved)
+    # Utils for Prompting & Masking 
     # -------------------------------------------------------------------------
     
     uni_prompting = UniversalPrompting(
@@ -416,7 +416,7 @@ def main():
     mask_scheduler = get_mask_chedule(config.training.noise_type)
 
     # -------------------------------------------------------------------------
-    # Resume from Checkpoint (Original Logic Preserved)
+    # Resume from Checkpoint 
     # -------------------------------------------------------------------------
     if config.experiment.resume_from_checkpoint:
         if config.experiment.resume_from_checkpoint != "latest":
@@ -498,7 +498,7 @@ def main():
                 # Extract Middle Layer Features for Generation
                 # Shape: [Batch, Seq, Dim]. We pool to get [Batch, Dim]
                 # Note: We assume Layer 16 (or configured layer). 
-                # We perform mean pooling to get a robust representation.
+               
                 feat_gen_raw = ret_gen.hidden_states[diva_cfg.middle_layer_idx].mean(dim=1)
 
                 # ==========================================
