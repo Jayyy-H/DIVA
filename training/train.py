@@ -170,6 +170,18 @@ def main():
     if diva_cfg.stage == 1:
         for p in model.parameters():
             p.requires_grad = False
+    
+        diva_params = (
+            list(shared_enc_und.parameters())
+            + list(shared_enc_gen.parameters())
+            + list(A_U.parameters())
+            + list(A_G.parameters())
+        )
+    
+        optimizer_grouped_parameters.append(
+            {"params": diva_params, "weight_decay": weight_decay}
+        )
+
      
     elif diva_cfg.stage == 2:
         logger.info("[DIVA Stage 2] Unfreezing Show-o Backbone. Joint Training enabled.")
@@ -192,7 +204,12 @@ def main():
         betas=(config.optimizer.params.beta1, config.optimizer.params.beta2),
         eps=config.optimizer.params.epsilon,
     )
-    
+
+    optimizer_club = AdamW(
+        club_disc.parameters(),
+        lr=diva_cfg.lr_club
+    )
+
     # -------------------------------------------------------------------------
     # Dataset 
     # -------------------------------------------------------------------------
@@ -280,18 +297,6 @@ def main():
         optimizer=optimizer,
         num_warmup_steps=config.lr_scheduler.params.warmup_steps * accelerator.num_processes,
         num_training_steps=max_train_steps * accelerator.num_processes,
-    )
-
-    # -------------------------------------------------------------------------
-    # Accelerator Prepare 
-    (
-        model, 
-        shared_enc_und, shared_enc_gen, unique_enc_und, unique_enc_gen, club_disc,
-        optimizer, optimizer_club, train_dataloader, lr_scheduler
-    ) = accelerator.prepare(
-        model, 
-        shared_enc_und, shared_enc_gen, unique_enc_und, unique_enc_gen, club_disc,
-        optimizer, optimizer_club, train_dataloader, lr_scheduler
     )
 
     # Recalculate steps after prepare 
@@ -418,12 +423,15 @@ def main():
                 
                 # Extract Middle Layer Features for Understanding
                 feat_und_raw = ret_und.hidden_states[diva_cfg.middle_layer_idx].mean(dim=1)
+
+                if diva_cfg.stage == 1:
+                    z_un_und = torch.zeros_like(z_sh_und)
+                    z_un_gen = torch.zeros_like(z_sh_gen)
+                else:
+                    z_un_und = unique_enc_und(feat_und_raw)
+                    z_un_gen = unique_enc_gen(feat_gen_raw)
+
                 
-                z_sh_und = shared_enc_und(feat_und_raw)
-                z_sh_gen = shared_enc_gen(feat_gen_raw)
-                
-                z_un_und = unique_enc_und(feat_und_raw)
-                z_un_gen = unique_enc_gen(feat_gen_raw)
                 
                 
                 # =====================================================
@@ -436,9 +444,10 @@ def main():
                 
                 
                 # low-rank readout → bias
-                if stage==1:
+                if diva_cfg.stage == 1:
+
                     bias_U = A_U(z_sh_gen)
-                    bias_G = A_G(z_sh_UND)
+                    bias_G = A_G(z_sh_und)
                 else:
                     bias_U = A_U(z_sh_gen) + A_U(z_un_und)
                     bias_G = A_G(z_sh_und) + A_G(z_un_gen)
@@ -498,13 +507,20 @@ def main():
                 # =====================================================
                 
                 
-                loss_total = (
-                    loss_gen
-                    + loss_und
-                    + diva_cfg.lambda_sha * loss_align
-                    + diva_cfg.lambda_uni * loss_mi
-                    + diva_cfg.lambda_orth * loss_orth
-                )
+                if diva_cfg.stage == 1:
+                    loss_total = (
+                        loss_gen
+                        + loss_und
+                        + diva_cfg.lambda_sha * loss_align
+                   )
+                else:
+                    loss_total = (
+                        loss_gen
+                        + loss_und
+                        + diva_cfg.lambda_sha * loss_align
+                        + diva_cfg.lambda_uni * loss_mi
+                        + diva_cfg.lambda_orth * loss_orth
+                    )
 
 
 
