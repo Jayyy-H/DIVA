@@ -34,7 +34,7 @@ from models.lr_schedulers import get_scheduler
 # =========================================================================
 # Import Modules
 # =========================================================================
-from training.diva_utils import DIVAConfig, GatedMLP, CLUB, info_nce_loss
+from training.diva_utils import DIVAConfig, GatedMLP, CLUB, info_nce_loss, LowRankReadout, orthogonal_loss
 
 logger = get_logger(__name__)
 
@@ -120,115 +120,120 @@ def main():
     tokenizer.pad_token_id = tokenizer.eos_token_id
 
     # Initialize DIVA Modules
+
+    
     diva_cfg = DIVAConfig()
-    diva_cfg.stage = args.diva_stage # Override config with CLI arg
+    diva_cfg.stage = args.diva_stage
     
-    logger.info(f"*** DIVA Initialization: Running Stage {diva_cfg.stage} ***")
+    logger.info(f"===== DIVA Stage {diva_cfg.stage} =====")
+    
+    # ---------------------------------------------------------
+    # Shared Encoders
+    # ---------------------------------------------------------
 
+    shared_enc_und = GatedMLP(
+        diva_cfg.hidden_dim, diva_cfg.bottleneck_dim
+    ).to(accelerator.device)
+    
+    shared_enc_gen = GatedMLP(
+        diva_cfg.hidden_dim, diva_cfg.bottleneck_dim
+    ).to(accelerator.device)
+    
+    # ---------------------------------------------------------
+    # Unique Encoders 
+    # ---------------------------------------------------------
+    unique_enc_und = GatedMLP(
+        diva_cfg.hidden_dim, diva_cfg.bottleneck_dim
+    ).to(accelerator.device)
+    
+    unique_enc_gen = GatedMLP(
+        diva_cfg.hidden_dim, diva_cfg.bottleneck_dim
+    ).to(accelerator.device)
+    
+    # ---------------------------------------------------------
+    # Low-Rank Readouts
+    # ---------------------------------------------------------
+    A_und = LowRankReadout(
+        diva_cfg.bottleneck_dim,
+        model.config.vocab_size,
+        rank=64,
+    ).to(accelerator.device)
+    
+    A_gen = LowRankReadout(
+        diva_cfg.bottleneck_dim,
+        model.config.vocab_size,
+        rank=64,
+    ).to(accelerator.device)
+    
+   
+    club_und = CLUB(
+        diva_cfg.bottleneck_dim,
+        diva_cfg.bottleneck_dim,
+    ).to(accelerator.device)
+    
+    club_gen = CLUB(
+        diva_cfg.bottleneck_dim,
+        diva_cfg.bottleneck_dim,
+    ).to(accelerator.device)
+    
     # =========================================================
-    # Encoders
+    # FREEZE / UNFREEZE STRATEGY
     # =========================================================
-    shared_enc_und = GatedMLP(diva_cfg.hidden_dim, diva_cfg.proj_dim).to(accelerator.device)
-    shared_enc_gen = GatedMLP(diva_cfg.hidden_dim, diva_cfg.proj_dim).to(accelerator.device)
     
-    unique_enc_und = GatedMLP(diva_cfg.hidden_dim, diva_cfg.proj_dim).to(accelerator.device)
-    unique_enc_gen = GatedMLP(diva_cfg.hidden_dim, diva_cfg.proj_dim).to(accelerator.device)
-    
-    
-    # =========================================================
-    # Low-rank readouts  
-    # =========================================================
-    rank = diva_cfg.readout_rank
-    
-    class LowRankReadout(torch.nn.Module):
-        def __init__(self, in_dim, out_dim, r):
-            super().__init__()
-            self.P = torch.nn.Linear(in_dim, r, bias=False)
-            self.Q = torch.nn.Linear(r, out_dim, bias=False)
-    
-        def forward(self, x):
-            return self.Q(self.P(x))
-    
-    
-    # map → vocab logits bias
-    A_U = LowRankReadout(diva_cfg.proj_dim, model.config.vocab_size, rank).to(accelerator.device)
-    A_G = LowRankReadout(diva_cfg.proj_dim, model.config.vocab_size, rank).to(accelerator.device)
-
-    
-    # CLUB Discriminator
-    club_disc = CLUB(diva_cfg.hidden_dim, diva_cfg.hidden_dim).to(accelerator.device)
-
-    # -------------------------------------------------------------------------
-    # Two-Stage Optimizer Configuration 
-    # -------------------------------------------------------------------------
-    
-    # Default weight decay logic from original code
-    weight_decay = config.optimizer.params.weight_decay
-    
-    # Parameter Grouping Logic
-    optimizer_grouped_parameters = []
     if diva_cfg.stage == 1:
+        logger.info("Stage 1: Freeze backbone")
         for p in model.parameters():
             p.requires_grad = False
     
-        diva_params = (
-            list(shared_enc_und.parameters())
-            + list(shared_enc_gen.parameters())
-            + list(A_U.parameters())
-            + list(A_G.parameters())
-        )
-    
-        optimizer_grouped_parameters.append(
-            {"params": diva_params, "weight_decay": weight_decay}
-        )
-
-     
     elif diva_cfg.stage == 2:
-        logger.info("[DIVA Stage 2] Unfreezing Show-o Backbone. Joint Training enabled.")
-        for param in model.parameters():
-            param.requires_grad = True 
-            
-        # Backbone Params
-        backbone_groups = get_grouped_params(model, weight_decay)
-        optimizer_grouped_parameters.extend(backbone_groups)
-        
-        # DIVA Encoder Params
-        diva_params = list(shared_enc_und.parameters()) + list(shared_enc_gen.parameters()) + \
-                      list(unique_enc_und.parameters()) + list(unique_enc_gen.parameters())
-        optimizer_grouped_parameters.append({"params": diva_params, "weight_decay": weight_decay})
-
-    # Main Optimizer
+        logger.info("Stage 2: Joint training")
+        for p in model.parameters():
+            p.requires_grad = True
+    
+    # =========================================================
+    # OPTIMIZERS
+    # =========================================================
+    
+    main_params = []
+    
+    if diva_cfg.stage == 2:
+        main_params += list(model.parameters())
+    
+    main_params += (
+        list(shared_enc_und.parameters())
+        + list(shared_enc_gen.parameters())
+        + list(A_und.parameters())
+        + list(A_gen.parameters())
+    )
+    
+    if diva_cfg.stage == 2:
+        main_params += (
+            list(unique_enc_und.parameters())
+            + list(unique_enc_gen.parameters())
+        )
+    
     optimizer = AdamW(
-        optimizer_grouped_parameters,
+        main_params,
         lr=config.optimizer.params.learning_rate,
-        betas=(config.optimizer.params.beta1, config.optimizer.params.beta2),
-        eps=config.optimizer.params.epsilon,
-    )
-
-    optimizer_club = AdamW(
-        club_disc.parameters(),
-        lr=diva_cfg.lr_club
+        betas=(0.9, 0.999),
+        weight_decay=config.optimizer.params.weight_decay,
     )
 
     # -------------------------------------------------------------------------
-    # Dataset 
+    # Critic optimizers 
     # -------------------------------------------------------------------------
+
+    if diva_cfg.stage == 2:
+        optimizer_club_und = AdamW(
+            club_und.parameters(),
+            lr=diva_cfg.lr_club,
+        )
     
-    dataset = Text2ImageDataset(
-        config.data.dataset.train_data_path,
-        tokenizer=tokenizer,
-        image_size=config.data.preprocessing.resolution,
-        max_seq_length=config.data.preprocessing.max_seq_length,
-    )
-    
-    dataloader = torch.utils.data.DataLoader(
-        dataset,
-        batch_size=config.training.batch_size_t2i,
-        shuffle=True,
-        num_workers=config.data.dataset.num_workers,
-        pin_memory=True,
-        drop_last=True
-    )
+        optimizer_club_gen = AdamW(
+            club_gen.parameters(),
+            lr=diva_cfg.lr_club,
+        )
+
 
     # Schedulers (Original Logic)
     num_update_steps_per_epoch = math.ceil(len(dataloader) / config.training.gradient_accumulation_steps)
@@ -242,15 +247,42 @@ def main():
     )
 
     # Prepare with Accelerator 
+    if diva_cfg.stage == 2:
     (
-        model, 
-        shared_enc_und, shared_enc_gen, unique_enc_und, unique_enc_gen, club_disc,
-        optimizer, optimizer_club, dataloader, lr_scheduler
+        model,
+        shared_enc_und, shared_enc_gen,
+        unique_enc_und, unique_enc_gen,
+        club_und, club_gen,
+        optimizer,
+        optimizer_club_und, optimizer_club_gen,
+        train_dataloader,
+        lr_scheduler,
     ) = accelerator.prepare(
-        model, 
-        shared_enc_und, shared_enc_gen, unique_enc_und, unique_enc_gen, club_disc,
-        optimizer, optimizer_club, dataloader, lr_scheduler
+        model,
+        shared_enc_und, shared_enc_gen,
+        unique_enc_und, unique_enc_gen,
+        club_und, club_gen,
+        optimizer,
+        optimizer_club_und, optimizer_club_gen,
+        train_dataloader,
+        lr_scheduler,
     )
+    else:
+        (
+            model,
+            shared_enc_und, shared_enc_gen,
+            unique_enc_und, unique_enc_gen,
+            optimizer,
+            train_dataloader,
+            lr_scheduler,
+        ) = accelerator.prepare(
+            model,
+            shared_enc_und, shared_enc_gen,
+            unique_enc_und, unique_enc_gen,
+            optimizer,
+            train_dataloader,
+            lr_scheduler,
+        )
 
     
     mask_scheduler = get_mask_chedule(config.training.noise_type)
@@ -383,137 +415,187 @@ def main():
                 # A. Prepare Inputs (Shared Anchor)
                 # ==========================================
                 # batch contains: 'pixel_values', 'input_ids' (caption), 'attention_mask'
-                pixel_values = batch['pixel_values'].to(dtype=model.dtype)
-                input_ids = batch['input_ids']
-                
-                # 1. Encode Images to Discrete Tokens (VQ-VAE)
-                # We do this once, shared for both streams.
                 with torch.no_grad():
-                    image_tokens = vq_model.get_codebook_indices(pixel_values) # [B, 1024] or similar
+                    image_tokens = vq_model.get_codebook_indices(
+                            batch["pixel_values"].to(dtype=model.dtype)
+                    )
                 
+                input_ids = batch["input_ids"]
+                
+                # ---------------------------------------------------------
+                # 2. Generation Flow (t2i)
+                # ---------------------------------------------------------
                 ret_gen = model(
                     input_ids=input_ids,
                     image_tokens=image_tokens,
                     input_type="t2i",
                     mask_scheduler=mask_scheduler,
-                    output_hidden_states=True, 
-                    return_dict=True
+                    output_hidden_states=True,
+                    return_dict=True,
                 )
-                loss_gen = ret_gen.loss
                 
-                # Extract Middle Layer Features for Generation
-                # Shape: [Batch, Seq, Dim]. We pool to get [Batch, Dim]
- 
-               
-                feat_gen_raw = ret_gen.hidden_states[diva_cfg.middle_layer_idx].mean(dim=1)
-
-                # ==========================================
-                # Stream 2: Understanding 
-                # ==========================================
+                # middle-layer features → [B, hidden_dim]
+                feat_gen = ret_gen.hidden_states[
+                    diva_cfg.middle_layer_idx
+                ].mean(dim=1)
                 
+                # ---------------------------------------------------------
+                # 3. Understanding Flow (mmu)
+                # ---------------------------------------------------------
                 ret_und = model(
                     input_ids=input_ids,
                     image_tokens=image_tokens,
                     input_type="mmu",
-                    labels=input_ids, 
-                    output_hidden_states=True, 
-                    return_dict=True
+                    labels=input_ids,
+                    output_hidden_states=True,
+                    return_dict=True,
                 )
-                loss_und = ret_und.loss
                 
-                # Extract Middle Layer Features for Understanding
-                feat_und_raw = ret_und.hidden_states[diva_cfg.middle_layer_idx].mean(dim=1)
-
+                feat_und = ret_und.hidden_states[
+                    diva_cfg.middle_layer_idx
+                ].mean(dim=1)
+                
+                # =========================================================
+                # 4. Factorization
+                # =========================================================
+                
+                # -------- Shared representations --------
+                z_sh_gen = shared_enc_gen(feat_gen)
+                z_sh_und = shared_enc_und(feat_und)
+                
+                # -------- Unique representations --------
                 if diva_cfg.stage == 1:
-                    z_un_und = torch.zeros_like(z_sh_und)
+                    # Stage 1: no unique branch
                     z_un_gen = torch.zeros_like(z_sh_gen)
+                    z_un_und = torch.zeros_like(z_sh_und)
                 else:
-                    z_un_und = unique_enc_und(feat_und_raw)
-                    z_un_gen = unique_enc_gen(feat_gen_raw)
+                    z_un_gen = unique_enc_gen(feat_gen)
+                    z_un_und = unique_enc_und(feat_und)
 
                 
+                if diva_cfg.stage == 2:
+
+                    # -----------------------------------------------------
+                    # Critic Update 
+                    # -----------------------------------------------------
+                    optimizer_club_und.zero_grad()
+                    optimizer_club_gen.zero_grad()
                 
+                    # Detach 
+                    loss_club_und = club_und.loglikeli(
+                        z_sh_und.detach(),
+                        z_un_und.detach(),
+                    )
                 
-                # =====================================================
-                # Logit Injection 
-                # =====================================================
+                    loss_club_gen = club_gen.loglikeli(
+                        z_sh_gen.detach(),
+                        z_un_gen.detach(),
+                    )
                 
-                # backbone logits
+                    loss_club_total = -(loss_club_und + loss_club_gen)
+                
+                    accelerator.backward(loss_club_total)
+                
+                    optimizer_club_und.step()
+                    optimizer_club_gen.step()
+                
+                    # -----------------------------------------------------
+                    # MI Estimation 
+                    # -----------------------------------------------------
+                    
+                    for p in club_und.parameters():
+                        p.requires_grad = False
+                    for p in club_gen.parameters():
+                        p.requires_grad = False
+                
+                    loss_mi_und = club_und.mi_est(z_sh_und, z_un_und)
+                    loss_mi_gen = club_gen.mi_est(z_sh_gen, z_un_gen)
+                
+                    loss_mi = loss_mi_und + loss_mi_gen
+                
+                   
+                    for p in club_und.parameters():
+                        p.requires_grad = True
+                    for p in club_gen.parameters():
+                        p.requires_grad = True
+                
+                else:
+                    loss_mi = torch.tensor(0.0, device=z_sh_gen.device)
+                
                 logits_gen = ret_gen.logits
+                
                 logits_und = ret_und.logits
                 
-                
-                # low-rank readout → bias
                 if diva_cfg.stage == 1:
-
-                    bias_U = A_U(z_sh_gen)
-                    bias_G = A_G(z_sh_und)
+                    bias_gen = A_gen(z_sh_gen)
+                    bias_und = A_und(z_sh_und)
                 else:
-                    bias_U = A_U(z_sh_gen) + A_U(z_un_und)
-                    bias_G = A_G(z_sh_und) + A_G(z_un_gen)
-               
-                
-                # broadcast to token dimension
-                bias_U = bias_U.unsqueeze(1)
-                bias_G = bias_G.unsqueeze(1)
-                
-                logits_und = logits_und + bias_U
-                logits_gen = logits_gen + bias_G
+                    bias_gen = A_gen(z_sh_gen + z_un_gen)
+                    bias_und = A_und(z_sh_und + z_un_und)
                 
                 
-                # =====================================================
-                # recompute CE loss with injected logits
-                # =====================================================
-
-                optimizer_club.zero_grad()
-
-                loss_club = club_disc.loglikeli(z_sh_und.detach(), z_un_und.detach()) + \
-                            club_disc.loglikeli(z_sh_gen.detach(), z_un_gen.detach())
+                bias_gen = bias_gen.unsqueeze(1)
+                bias_und = bias_und.unsqueeze(1)
                 
-                accelerator.backward(-loss_club)
-                optimizer_club.step()
-
-                loss_mi = club_disc.mi_est(z_sh_und, z_un_und) + \
-                          club_disc.mi_est(z_sh_gen, z_un_gen)
-
-                loss_align = info_nce_loss(z_sh_und, z_sh_gen, diva_cfg.temp)
-
+                logits_gen = logits_gen + bias_gen
+                logits_und = logits_und + bias_und
+                
+                
+                # ---------------------------------------------------------
+                # Recompute Cross Entropy
+                # ---------------------------------------------------------
                 
                 loss_gen = F.cross_entropy(
                     logits_gen.view(-1, logits_gen.size(-1)),
                     ret_gen.labels.view(-1),
-                    ignore_index=-100
+                    ignore_index=-100,
                 )
                 
                 loss_und = F.cross_entropy(
                     logits_und.view(-1, logits_und.size(-1)),
                     ret_und.labels.view(-1),
-                    ignore_index=-100
+                    ignore_index=-100,
                 )
                 
                 
-                # =====================================================
-                # Orthogonality guardrail
-                # =====================================================
+                # ---------------------------------------------------------
+                # Shared Alignment 
+                # ---------------------------------------------------------
                 
-                loss_orth = (
-                    (z_sh_und.T @ z_un_und).pow(2).mean() +
-                    (z_sh_gen.T @ z_un_gen).pow(2).mean()
+                loss_align = info_nce_loss(
+                    z_sh_und,
+                    z_sh_gen,
+                    temperature=diva_cfg.temp,
                 )
                 
                 
-                # =====================================================
-                # Stage 1 total loss
-                # =====================================================
+                # ---------------------------------------------------------
+                # Orthogonality (Stage 2 only)
+                # ---------------------------------------------------------
                 
+                if diva_cfg.stage == 2:
+                    loss_orth = (
+                        orthogonal_loss(z_sh_und, z_un_und)
+                        + orthogonal_loss(z_sh_gen, z_un_gen)
+                    )
+                else:
+                    loss_orth = torch.tensor(0.0, device=loss_gen.device)
+                
+                
+                # ---------------------------------------------------------
+                # Total Loss
+                # ---------------------------------------------------------
                 
                 if diva_cfg.stage == 1:
+                
                     loss_total = (
                         loss_gen
                         + loss_und
                         + diva_cfg.lambda_sha * loss_align
-                   )
+                    )
+                
                 else:
+                
                     loss_total = (
                         loss_gen
                         + loss_und
@@ -521,26 +603,23 @@ def main():
                         + diva_cfg.lambda_uni * loss_mi
                         + diva_cfg.lambda_orth * loss_orth
                     )
-
-
-
-
+                
+                
+                optimizer.zero_grad()
+                
                 accelerator.backward(loss_total)
                 
-                # Gradient Clipping
                 if accelerator.sync_gradients:
-                    # Clip gradients for all trainable parameters
-                    params_to_clip = list(model.parameters()) + \
-                                     list(shared_enc_und.parameters()) + list(shared_enc_gen.parameters()) + \
-                                     list(unique_enc_und.parameters()) + list(unique_enc_gen.parameters())
-                    accelerator.clip_grad_norm_(params_to_clip, config.training.max_grad_norm)
-
+                    accelerator.clip_grad_norm_(
+                        main_params,
+                        config.training.max_grad_norm,
+                    )
+                
                 optimizer.step()
                 lr_scheduler.step()
-                optimizer.zero_grad()
 
             # -------------------------------------------------------------------------
-            # Logging (Original Logic + DIVA Metrics)
+            # Logging 
             # -------------------------------------------------------------------------
             if accelerator.sync_gradients:
                 if global_step % config.experiment.log_every == 0:
@@ -556,8 +635,6 @@ def main():
                             "train/loss_gen": loss_gen.item(),
                             "train/loss_und": loss_und.item(),
                             "train/loss_align": loss_align.item(),
-                            "train/loss_dis": loss_dis.item(),
-                            "train/club_loglikeli": loss_club_update.item(), # Monitor discriminator quality
                             "train/lr": lr_scheduler.get_last_lr()[0],
                             "train/epoch": epoch,
                         })
@@ -586,7 +663,8 @@ def main():
                     torch.save(accelerator.unwrap_model(shared_enc_gen).state_dict(), save_path / "diva_shared_gen.pth")
                     torch.save(accelerator.unwrap_model(unique_enc_und).state_dict(), save_path / "diva_unique_und.pth")
                     torch.save(accelerator.unwrap_model(unique_enc_gen).state_dict(), save_path / "diva_unique_gen.pth")
-                    torch.save(accelerator.unwrap_model(club_disc).state_dict(), save_path / "diva_club.pth")
+                    torch.save(accelerator.unwrap_model(club_und).state_dict(), save_path / "diva_club_und.pth")
+                    torch.save(accelerator.unwrap_model(club_gen).state_dict(), save_path / "diva_club_gen.pth")
 
                     json.dump({"global_step": global_step}, (save_path / "metadata.json").open("w+"))
                     logger.info(f"Saved state to {save_path}")
