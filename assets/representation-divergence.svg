@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="430" viewBox="0 0 1400 430">
+  <rect width="1400" height="430" fill="#ffffff"/>
+  <text x="700" y="38" text-anchor="middle" font-family="Arial" font-size="32" font-weight="700" fill="#111827">Representation Divergence and Synergy</text>
+  <g font-family="Arial" fill="#111827">
+    <rect x="55" y="80" width="390" height="285" rx="16" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
+    <text x="250" y="118" text-anchor="middle" font-size="22" font-weight="700">Inductive Bias Conflict</text>
+    <line x1="105" y1="315" x2="390" y2="315" stroke="#94a3b8" stroke-width="2"/><line x1="105" y1="315" x2="105" y2="150" stroke="#94a3b8" stroke-width="2"/>
+    <path d="M110 175 C150 300 210 320 260 305 C315 288 350 245 385 180" fill="none" stroke="#2563eb" stroke-width="5"/>
+    <path d="M110 190 C150 180 210 170 260 190 C315 210 350 265 385 300" fill="none" stroke="#16a34a" stroke-width="5"/>
+    <text x="155" y="345" font-size="16" fill="#475569">shallow</text><text x="235" y="345" font-size="16" fill="#475569">middle</text><text x="330" y="345" font-size="16" fill="#475569">deep</text>
+    <text x="120" y="145" font-size="15" fill="#2563eb">understanding</text><text x="270" y="145" font-size="15" fill="#16a34a">generation</text>
+    <rect x="505" y="80" width="390" height="285" rx="16" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
+    <text x="700" y="118" text-anchor="middle" font-size="22" font-weight="700">Geometric Subspace Divergence</text>
+    <line x1="555" y1="315" x2="840" y2="315" stroke="#94a3b8" stroke-width="2"/><line x1="555" y1="315" x2="555" y2="150" stroke="#94a3b8" stroke-width="2"/>
+    <path d="M560 285 C620 250 660 185 700 165 C750 185 795 245 835 285" fill="none" stroke="#0ea5e9" stroke-width="6"/>
+    <rect x="645" y="150" width="110" height="150" rx="10" fill="#dbeafe" opacity="0.65"/>
+    <text x="700" y="335" text-anchor="middle" font-size="16" fill="#475569">effective-rank increment peaks in middle layers</text>
+    <rect x="955" y="80" width="390" height="285" rx="16" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/>
+    <text x="1150" y="118" text-anchor="middle" font-size="22" font-weight="700">Frequency Preference</text>
+    <line x1="1005" y1="315" x2="1290" y2="315" stroke="#94a3b8" stroke-width="2"/><line x1="1005" y1="315" x2="1005" y2="150" stroke="#94a3b8" stroke-width="2"/>
+    <path d="M1010 260 C1070 230 1120 200 1180 175 C1230 160 1260 155 1285 150" fill="none" stroke="#2563eb" stroke-width="5"/>
+    <path d="M1010 300 C1070 285 1120 250 1180 210 C1230 175 1260 160 1285 155" fill="none" stroke="#16a34a" stroke-width="5"/>
+    <text x="1150" y="335" text-anchor="middle" font-size="16" fill="#475569">semantic invariance and detail sensitivity become complementary</text>
+  </g>
+</svg>

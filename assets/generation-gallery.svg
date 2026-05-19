@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="820" viewBox="0 0 1200 820">
+  <rect width="1200" height="820" fill="#ffffff"/>
+  <text x="600" y="48" text-anchor="middle" font-family="Arial" font-size="32" font-weight="700" fill="#111827">Generation Capability Gallery</text>
+  <g font-family="Arial" font-size="18" fill="#0f172a">
+    <rect x="70" y="90" width="240" height="145" rx="16" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/><text x="190" y="132" text-anchor="middle" font-weight="700">World Knowledge</text><text x="190" y="172" text-anchor="middle" fill="#475569">horses under</text><text x="190" y="198" text-anchor="middle" fill="#475569">the Eiffel Tower</text>
+    <rect x="350" y="90" width="240" height="145" rx="16" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/><text x="470" y="132" text-anchor="middle" font-weight="700">Spatial Layout</text><text x="470" y="172" text-anchor="middle" fill="#475569">backpack below</text><text x="470" y="198" text-anchor="middle" fill="#475569">a cake</text>
+    <rect x="630" y="90" width="240" height="145" rx="16" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/><text x="750" y="132" text-anchor="middle" font-weight="700">Multi-Object</text><text x="750" y="172" text-anchor="middle" fill="#475569">two dogs lying</text><text x="750" y="198" text-anchor="middle" fill="#475569">together</text>
+    <rect x="910" y="90" width="220" height="145" rx="16" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/><text x="1020" y="132" text-anchor="middle" font-weight="700">Counterfactual</text><text x="1020" y="172" text-anchor="middle" fill="#475569">clock on a</text><text x="1020" y="198" text-anchor="middle" fill="#475569">sheep head</text>
+    <rect x="70" y="280" width="240" height="145" rx="16" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/><text x="190" y="322" text-anchor="middle" font-weight="700">Style Control</text><text x="190" y="362" text-anchor="middle" fill="#475569">red bus in</text><text x="190" y="388" text-anchor="middle" fill="#475569">cartoon style</text>
+    <rect x="350" y="280" width="240" height="145" rx="16" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/><text x="470" y="322" text-anchor="middle" font-weight="700">Complex Scene</text><text x="470" y="362" text-anchor="middle" fill="#475569">decorated desk</text><text x="470" y="388" text-anchor="middle" fill="#475569">with many objects</text>
+    <rect x="630" y="280" width="240" height="145" rx="16" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/><text x="750" y="322" text-anchor="middle" font-weight="700">Attribute Binding</text><text x="750" y="362" text-anchor="middle" fill="#475569">red and blue</text><text x="750" y="388" text-anchor="middle" fill="#475569">airplane</text>
+    <rect x="910" y="280" width="220" height="145" rx="16" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2"/><text x="1020" y="322" text-anchor="middle" font-weight="700">Text Rendering</text><text x="1020" y="362" text-anchor="middle" fill="#475569">sign with</text><text x="1020" y="388" text-anchor="middle" fill="#475569">DIVA</text>
+    <rect x="180" y="505" width="840" height="170" rx="20" fill="#ecfeff" stroke="#06b6d4" stroke-width="2"/>
+    <text x="600" y="555" text-anchor="middle" font-size="24" font-weight="700" fill="#164e63">DIVA improves prompt faithfulness across diverse generation settings.</text>
+    <text x="600" y="602" text-anchor="middle" font-size="18" fill="#475569">The full paper contains the original image grids and additional qualitative samples.</text>
+    <text x="600" y="635" text-anchor="middle" font-size="18" fill="#475569">Repository assets will be updated with release-quality figures alongside the code release.</text>
+  </g>
+</svg>

@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560">
+  <rect width="1200" height="560" fill="#f8fafc"/>
+  <text x="600" y="52" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="34" font-weight="700" fill="#0f172a">DIVA: From Representation Conflict to Mutual Reinforcement</text>
+  <rect x="70" y="105" width="480" height="350" rx="18" fill="#ffffff" stroke="#cbd5e1" stroke-width="3"/>
+  <text x="310" y="148" text-anchor="middle" font-family="Arial" font-size="26" font-weight="700" fill="#334155">Conflict of Inductive Biases</text>
+  <rect x="135" y="195" width="350" height="70" rx="12" fill="#dbeafe" stroke="#60a5fa" stroke-width="2"/>
+  <text x="310" y="238" text-anchor="middle" font-family="Arial" font-size="24" font-weight="700" fill="#1e3a8a">Understanding Flow</text>
+  <rect x="135" y="330" width="350" height="70" rx="12" fill="#dcfce7" stroke="#4ade80" stroke-width="2"/>
+  <text x="310" y="373" text-anchor="middle" font-family="Arial" font-size="24" font-weight="700" fill="#14532d">Generation Flow</text>
+  <path d="M310 272 L310 322" stroke="#64748b" stroke-width="5" stroke-dasharray="10 10"/>
+  <text x="310" y="304" text-anchor="middle" font-family="Arial" font-size="42" font-weight="700" fill="#ef4444">x</text>
+  <text x="310" y="438" text-anchor="middle" font-family="Arial" font-size="18" fill="#475569">Different supervision signals pull the shared backbone apart.</text>
+  <rect x="650" y="105" width="480" height="350" rx="18" fill="#ffffff" stroke="#cbd5e1" stroke-width="3"/>
+  <text x="890" y="148" text-anchor="middle" font-family="Arial" font-size="26" font-weight="700" fill="#334155">Same Anchor, Complementary Flows</text>
+  <circle cx="760" cy="280" r="68" fill="#fee2e2" stroke="#fb7185" stroke-width="3"/>
+  <text x="760" y="272" text-anchor="middle" font-family="Arial" font-size="20" font-weight="700" fill="#7f1d1d">Image</text>
+  <text x="760" y="298" text-anchor="middle" font-family="Arial" font-size="20" font-weight="700" fill="#7f1d1d">Text Pair</text>
+  <rect x="910" y="190" width="160" height="60" rx="12" fill="#dbeafe" stroke="#60a5fa" stroke-width="2"/>
+  <text x="990" y="228" text-anchor="middle" font-family="Arial" font-size="20" font-weight="700" fill="#1e3a8a">Semantic</text>
+  <rect x="910" y="320" width="160" height="60" rx="12" fill="#dcfce7" stroke="#4ade80" stroke-width="2"/>
+  <text x="990" y="358" text-anchor="middle" font-family="Arial" font-size="20" font-weight="700" fill="#14532d">Structural</text>
+  <path d="M820 250 C865 210 880 210 910 220" fill="none" stroke="#2563eb" stroke-width="5" marker-end="url(#arrow)"/>
+  <path d="M820 310 C865 350 880 350 910 350" fill="none" stroke="#16a34a" stroke-width="5" marker-end="url(#arrow)"/>
+  <text x="890" y="438" text-anchor="middle" font-family="Arial" font-size="18" fill="#475569">DIVA factorizes shared and unique information for beneficial transfer.</text>
+  <defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#334155"/></marker></defs>
+</svg>
