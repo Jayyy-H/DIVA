@@ -46,7 +46,7 @@ DIVA is a post-training framework with three main ingredients:
 
 The representation analysis below motivates the design: conflicts are strongest in shallow and deep layers, while middle layers expose useful subspace divergence that can be factorized and reused.
 
-![Representation divergence analysis](3.png)
+![Representation divergence analysis](assets/3.png)
 
 ## Results
 
