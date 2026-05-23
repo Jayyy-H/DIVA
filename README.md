@@ -32,11 +32,11 @@ Unified multimodal models aim to handle both visual understanding and image gene
 
 DIVA turns this conflict into mutual reinforcement. For the same image-text pair, we construct two task-induced information flows, factorize their middle-layer visual representations into **shared** and **unique** components, align the shared space, and protect task-specific information from cross-flow interference.
 
-![DIVA motivation](assets/teaser.svg)
+![DIVA motivation](assets/1.png)
 
 ## Method Overview
 
-![DIVA pipeline](assets/pipeline.svg)
+![DIVA pipeline](assets/2.png)
 
 DIVA is a post-training framework with three main ingredients:
 
@@ -46,7 +46,7 @@ DIVA is a post-training framework with three main ingredients:
 
 The representation analysis below motivates the design: conflicts are strongest in shallow and deep layers, while middle layers expose useful subspace divergence that can be factorized and reused.
 
-![Representation divergence analysis](assets/representation-divergence.svg)
+![Representation divergence analysis](3.png)
 
 ## Results
 
@@ -75,11 +75,11 @@ On Show-o, standard supervised fine-tuning on the same data brings only marginal
 
 After DIVA post-training, the model handles complex attributes, spatial layouts, multi-object prompts, and detailed object relationships more reliably.
 
-![Qualitative comparison](assets/qualitative-generation.svg)
+![Qualitative comparison](assets/4.png)
 
 Additional generation examples from the appendix:
 
-![DIVA generation gallery](assets/generation-gallery.svg)
+![DIVA generation gallery](assets/5.png)
 
 ## Open-Source Roadmap
 
