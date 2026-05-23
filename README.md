@@ -79,7 +79,9 @@ After DIVA post-training, the model handles complex attributes, spatial layouts,
 
 Additional generation examples from the appendix:
 
-![DIVA generation gallery](assets/5.png)
+<p align="center">
+  <img src="assets/5.png" alt="DIVA generation gallery">
+</p>
 
 ## Open-Source Roadmap
 
