@@ -2,7 +2,9 @@
 
 <p align="center">
   <a href="#"><img src="https://img.shields.io/badge/ICML-2026-blue" alt="ICML 2026"></a>
-  <a href="#"><img src="https://arxiv.org/abs/2605.25328" alt="ariv"></a>
+  <a href="https://arxiv.org/abs/2605.25328">
+    <img src="https://img.shields.io/badge/Paper-arXiv-b31b1b?logo=arxiv&logoColor=white" alt="arXiv">
+  </a>
   <a href="#"><img src="https://img.shields.io/badge/Code-cleaning%20in%20progress-orange" alt="Code cleaning in progress"></a>
   <a href="#"><img src="https://img.shields.io/badge/Checkpoints-planned-lightgrey" alt="Checkpoints planned"></a>
 </p>
