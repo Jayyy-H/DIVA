@@ -17,7 +17,6 @@ This repository hosts the official project page and upcoming implementation for 
 
 | Resource | Status |
 | --- | --- |
-| Paper | Coming soon |
 | Project page | Coming soon |
 | Training code | Planned |
 | Post-training data recipe | Planned |
